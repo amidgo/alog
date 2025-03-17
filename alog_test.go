@@ -1,6 +1,7 @@
 package alog
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func Test_Context_Logger(t *testing.T) {
@@ -62,17 +64,22 @@ func Test_errorAttr(t *testing.T) {
 }
 
 func Test_Error(t *testing.T) {
+	opts := &slog.HandlerOptions{
+		ReplaceAttr: replaceTimeKey(time.Now()),
+	}
+
 	alogBuf := &bytes.Buffer{}
-	alogLogger := slog.New(slog.NewTextHandler(alogBuf, nil))
+	alogLogger := slog.New(slog.NewTextHandler(alogBuf, opts))
 	ctx := Context(t.Context(), alogLogger)
 
 	slogBuf := &bytes.Buffer{}
-	slogLogger := slog.New(slog.NewTextHandler(slogBuf, nil))
+	slogLogger := slog.New(slog.NewTextHandler(slogBuf, opts))
 
 	slogArgs := []any{
 		"key", "value",
 		errorAttr(http.ErrServerClosed),
 		"int", 100,
+		"err", bufio.ErrTooLong,
 		slog.Any("ctx", ctx),
 		errorAttr(io.ErrUnexpectedEOF),
 	}
@@ -80,24 +87,26 @@ func Test_Error(t *testing.T) {
 		"key", "value",
 		http.ErrServerClosed,
 		"int", 100,
+		"err", bufio.ErrTooLong,
 		slog.Any("ctx", ctx),
 		io.ErrUnexpectedEOF,
 	}
 
 	fullLogScenario(ctx, slogLogger, alogArgs, slogArgs)
-
-	if alogBuf.String() != slogBuf.String() {
-		t.Fatalf("buffers not equal, alogBuf: %s, slogBuf: %s", alogBuf, slogBuf)
-	}
+	compareBuffers(t, slogBuf, alogBuf)
 }
 
 func Test_Log_Methods(t *testing.T) {
+	opts := &slog.HandlerOptions{
+		ReplaceAttr: replaceTimeKey(time.Now()),
+	}
+
 	alogBuf := &bytes.Buffer{}
-	alogLogger := slog.New(slog.NewTextHandler(alogBuf, nil))
+	alogLogger := slog.New(slog.NewTextHandler(alogBuf, opts))
 	ctx := Context(t.Context(), alogLogger)
 
 	slogBuf := &bytes.Buffer{}
-	slogLogger := slog.New(slog.NewTextHandler(slogBuf, nil))
+	slogLogger := slog.New(slog.NewTextHandler(slogBuf, opts))
 
 	args := []any{
 		"key", "value",
@@ -107,10 +116,7 @@ func Test_Log_Methods(t *testing.T) {
 	}
 
 	fullLogScenario(ctx, slogLogger, args, args)
-
-	if alogBuf.String() != slogBuf.String() {
-		t.Fatalf("buffers not equal, alogBuf: %s, slogBuf: %s", alogBuf, slogBuf)
-	}
+	compareBuffers(t, slogBuf, alogBuf)
 }
 
 func fullLogScenario(ctx context.Context, slogLogger *slog.Logger, alogArgs []any, slogArgs []any) {
@@ -146,4 +152,20 @@ func fullLogScenario(ctx context.Context, slogLogger *slog.Logger, alogArgs []an
 
 	Error(ctx, "error", alogArgs...)
 	slogLogger.ErrorContext(ctx, "error", slogArgs...)
+}
+
+func compareBuffers(t *testing.T, slogBuf, alogBuf fmt.Stringer) {
+	if alogBuf.String() != slogBuf.String() {
+		t.Fatalf("buffers not equal,\nalogBuf:\n%s\nslogBuf:\n%s", alogBuf, slogBuf)
+	}
+}
+
+func replaceTimeKey(staticTime time.Time) func(_ []string, a slog.Attr) slog.Attr {
+	return func(_ []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Time(slog.TimeKey, staticTime)
+		}
+
+		return a
+	}
 }
