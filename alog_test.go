@@ -13,15 +13,123 @@ import (
 	"time"
 )
 
-func Test_Context_Logger(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+func Test_Context_Handler(t *testing.T) {
+	handler := slog.NewJSONHandler(io.Discard, nil)
 
-	ctx := Context(t.Context(), logger)
+	ctx := Context(t.Context(), handler)
 
-	loggerFromCtx := Logger(ctx)
+	handlerFromCtx := Handler(ctx)
 
-	if logger != loggerFromCtx {
-		t.Fatal("logger not equal logger from ctx")
+	if handlerFromCtx != handler {
+		t.Fatal("handler not equal handler from ctx")
+	}
+
+	if ctx == t.Context() {
+		t.Fatal("unexpected non modify retuned context")
+	}
+}
+
+func Test_Context_nil_slog_Handler(t *testing.T) {
+	ctx := t.Context()
+
+	alogCtx := Context(ctx, nil)
+
+	if ctx != alogCtx {
+		t.Fatal("context has been modified")
+	}
+}
+
+func Test_Handler_DefaultHandler(t *testing.T) {
+	ctx := t.Context()
+
+	handlerFromCtx := Handler(ctx)
+
+	if handlerFromCtx != slog.Default().Handler() {
+		t.Fatal("return non default handler")
+	}
+}
+
+func Test_withSource(t *testing.T) {
+	out := new(bytes.Buffer)
+
+	h := slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: true})
+
+	ctx := Context(t.Context(), h)
+
+	Info(ctx, "Hello World!")
+
+	t.Logf("out: %q", out.String())
+}
+
+func Test_argsToAttrSlice(t *testing.T) {
+	type argsToAttrSliceTest struct {
+		name          string
+		args          []any
+		expectedAttrs []slog.Attr
+	}
+
+	ctx := t.Context()
+
+	tests := []argsToAttrSliceTest{
+		{
+			name: "string single args bad key",
+			args: []any{
+				"key",
+			},
+			expectedAttrs: []slog.Attr{
+				{
+					Key:   "!BADKEY",
+					Value: slog.StringValue("key"),
+				},
+			},
+		},
+		{
+			name: "string many args bad key",
+			args: []any{
+				"key",
+				"value",
+				100,
+			},
+			expectedAttrs: []slog.Attr{
+				slog.String("key", "value"),
+				slog.Any("!BADKEY", 100),
+			},
+		},
+		{
+			name: "error attr convert",
+			args: []any{
+				"key", "value",
+				http.ErrServerClosed,
+				"int", 100,
+				"err", bufio.ErrTooLong,
+				slog.Any("ctx", ctx),
+				io.ErrUnexpectedEOF,
+			},
+			expectedAttrs: []slog.Attr{
+				slog.String("key", "value"),
+				slog.String(ErrorKey, http.ErrServerClosed.Error()),
+				slog.Int("int", 100),
+				slog.Any("err", bufio.ErrTooLong),
+				slog.Any("ctx", ctx),
+				slog.String(ErrorKey, io.ErrUnexpectedEOF.Error()),
+			},
+		},
+	}
+
+	for _, tst := range tests {
+		t.Run(tst.name, func(t *testing.T) {
+			attrs := argsToAttrSlice(tst.args)
+
+			if len(attrs) != len(tst.expectedAttrs) {
+				t.Fatalf("args not equal\n\nexpected:\n%+v\n\nactual:\n%+v", tst.expectedAttrs, attrs)
+			}
+
+			for i := range attrs {
+				if !reflect.DeepEqual(attrs[i], tst.expectedAttrs[i]) {
+					t.Fatalf("compare %d arg, args not equal\n\nexpected:\n%+v\n\nactual:\n%+v", i, tst.expectedAttrs[i], attrs[i])
+				}
+			}
+		})
 	}
 }
 
@@ -65,12 +173,13 @@ func Test_errorAttr(t *testing.T) {
 
 func Test_Error(t *testing.T) {
 	opts := &slog.HandlerOptions{
+		Level:       slog.LevelError,
 		ReplaceAttr: replaceTimeKey(time.Now()),
 	}
 
 	alogBuf := &bytes.Buffer{}
-	alogLogger := slog.New(slog.NewTextHandler(alogBuf, opts))
-	ctx := Context(t.Context(), alogLogger)
+	alogHandler := slog.NewTextHandler(alogBuf, opts)
+	ctx := Context(t.Context(), alogHandler)
 
 	slogBuf := &bytes.Buffer{}
 	slogLogger := slog.New(slog.NewTextHandler(slogBuf, opts))
@@ -98,12 +207,13 @@ func Test_Error(t *testing.T) {
 
 func Test_Log_Methods(t *testing.T) {
 	opts := &slog.HandlerOptions{
+		Level:       slog.LevelDebug,
 		ReplaceAttr: replaceTimeKey(time.Now()),
 	}
 
 	alogBuf := &bytes.Buffer{}
-	alogLogger := slog.New(slog.NewTextHandler(alogBuf, opts))
-	ctx := Context(t.Context(), alogLogger)
+	alogHandler := slog.NewTextHandler(alogBuf, opts)
+	ctx := Context(t.Context(), alogHandler)
 
 	slogBuf := &bytes.Buffer{}
 	slogLogger := slog.New(slog.NewTextHandler(slogBuf, opts))
@@ -120,8 +230,14 @@ func Test_Log_Methods(t *testing.T) {
 }
 
 func fullLogScenario(ctx context.Context, slogLogger *slog.Logger, alogArgs []any, slogArgs []any) {
+	ctx = WithAttrs(ctx, argsToAttrSlice(alogArgs)...)
+	slogLogger = slog.New(slogLogger.Handler().WithAttrs(argsToAttrSlice(slogArgs)))
+
 	Log(ctx, slog.LevelDebug, "debug message", alogArgs...)
 	slogLogger.Log(ctx, slog.LevelDebug, "debug message", slogArgs...)
+
+	LogAttrs(ctx, slog.LevelDebug, "debug log attrs", argsToAttrSlice(alogArgs)...)
+	slogLogger.LogAttrs(ctx, slog.LevelDebug, "debug log attrs", argsToAttrSlice(slogArgs)...)
 
 	Debug(ctx, "debug message", alogArgs...)
 	slogLogger.DebugContext(ctx, "debug message", slogArgs...)

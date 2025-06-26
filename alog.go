@@ -3,61 +3,102 @@ package alog
 import (
 	"context"
 	"log/slog"
+	"runtime"
+	"time"
 )
 
-type loggerKey struct{}
+type handlerKey struct{}
 
-func Logger(ctx context.Context) *slog.Logger {
-	log, ok := ctx.Value(loggerKey{}).(*slog.Logger)
+func Handler(ctx context.Context) slog.Handler {
+	handler, ok := ctx.Value(handlerKey{}).(slog.Handler)
 	if !ok {
-		return slog.Default()
+		return slog.Default().Handler()
 	}
 
-	return log
+	return handler
 }
 
-func Context(ctx context.Context, log *slog.Logger) context.Context {
-	if log == nil {
+func Context(ctx context.Context, h slog.Handler) context.Context {
+	if h == nil {
 		return ctx
 	}
 
-	return context.WithValue(ctx, loggerKey{}, log)
+	return context.WithValue(ctx, handlerKey{}, h)
 }
 
 func With(ctx context.Context, args ...any) context.Context {
-	log := Logger(ctx)
+	h := Handler(ctx)
 
-	handler := log.
-		Handler().
-		WithAttrs(
-			argsToAttrSlice(args),
-		)
+	h = h.WithAttrs(
+		argsToAttrSlice(args),
+	)
 
-	log = slog.New(handler)
+	return Context(ctx, h)
+}
 
-	return Context(ctx, log)
+func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
+	h := Handler(ctx)
+
+	h = h.WithAttrs(attrs)
+
+	return Context(ctx, h)
 }
 
 func Info(ctx context.Context, msg string, args ...any) {
-	Log(ctx, slog.LevelInfo, msg, args...)
+	alog(ctx, slog.LevelInfo, msg, args...)
 }
 
 func Warn(ctx context.Context, msg string, args ...any) {
-	Log(ctx, slog.LevelWarn, msg, args...)
+	alog(ctx, slog.LevelWarn, msg, args...)
 }
 
 func Error(ctx context.Context, msg string, args ...any) {
-	Log(ctx, slog.LevelError, msg, args...)
+	alog(ctx, slog.LevelError, msg, args...)
 }
 
 func Debug(ctx context.Context, msg string, args ...any) {
-	Log(ctx, slog.LevelDebug, msg, args...)
+	alog(ctx, slog.LevelDebug, msg, args...)
 }
 
 func Log(ctx context.Context, level slog.Level, msg string, args ...any) {
-	log := Logger(ctx)
+	alog(ctx, level, msg, args...)
+}
 
-	log.LogAttrs(ctx, level, msg, argsToAttrSlice(args)...)
+func LogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	alogAttrs(ctx, level, msg, attrs...)
+}
+
+func alog(ctx context.Context, level slog.Level, msg string, args ...any) {
+	h := Handler(ctx)
+	if !h.Enabled(ctx, level) {
+		return
+	}
+
+	pcs := [1]uintptr{}
+	runtime.Callers(3, pcs[:])
+
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	attrs := argsToAttrSlice(args)
+
+	r.AddAttrs(attrs...)
+
+	_ = h.Handle(ctx, r)
+}
+
+func alogAttrs(ctx context.Context, level slog.Level, msg string, attrs ...slog.Attr) {
+	h := Handler(ctx)
+	if !h.Enabled(ctx, level) {
+		return
+	}
+
+	pcs := [1]uintptr{}
+	runtime.Callers(3, pcs[:])
+
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+
+	r.AddAttrs(attrs...)
+
+	_ = h.Handle(ctx, r)
 }
 
 const badKey = "!BADKEY"
