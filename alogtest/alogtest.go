@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -90,9 +91,10 @@ func NewHandler(
 	opts *AssertOptions,
 	ops ...Operation,
 ) slog.Handler {
-	newHandler := newTextHandler(false)
+	newHandler := newTextHandler
 
 	h := recordsCollector{
+		addSource:  assertOptionsAddSource(opts),
 		newHandler: newHandler,
 		mutates:    []func(h slog.Handler) slog.Handler{},
 		logs:       &logs{},
@@ -109,9 +111,7 @@ func assertOperationsExecuted(tester Tester, logs *logs, opts *AssertOptions, op
 	return func() {
 		actualRecords := logs.Records()
 
-		newHandler := newTextHandler(assertOptionsAddSource(opts))
-
-		expectedRecords := makeExpectedRecords(newHandler, ops)
+		expectedRecords := makeExpectedRecords(newTextHandler, ops)
 
 		if !assertOptionsCheckOrder(opts) {
 			slices.Sort(actualRecords)
@@ -211,6 +211,7 @@ func recordForTesterMessage(record string) string {
 }
 
 type recordsCollector struct {
+	addSource  bool
 	newHandler func(io.Writer) slog.Handler
 	mutates    []func(h slog.Handler) slog.Handler
 	logs       *logs
@@ -260,6 +261,17 @@ func (h recordsCollector) Handle(ctx context.Context, record slog.Record) error 
 	buf := new(bytes.Buffer)
 
 	handler := h.newHandler(buf)
+	if h.addSource {
+		handler = handler.WithAttrs(
+			[]slog.Attr{
+				slog.Any(
+					slog.SourceKey,
+					source(record),
+				),
+			},
+		)
+	}
+
 	for _, mutate := range h.mutates {
 		handler = mutate(handler)
 	}
@@ -272,6 +284,17 @@ func (h recordsCollector) Handle(ctx context.Context, record slog.Record) error 
 	h.logs.push(buf.String())
 
 	return nil
+}
+
+func source(r slog.Record) *slog.Source {
+	fs := runtime.CallersFrames([]uintptr{r.PC})
+	f, _ := fs.Next()
+
+	return &slog.Source{
+		Function: f.Function,
+		File:     f.File,
+		Line:     f.Line,
+	}
 }
 
 type logs struct {
@@ -298,16 +321,14 @@ func (l *logs) push(record string) {
 
 const minLevel slog.Level = math.MinInt
 
-func newTextHandler(addSource bool) func(io.Writer) slog.Handler {
-	return func(w io.Writer) slog.Handler {
-		return slog.NewTextHandler(w,
-			&slog.HandlerOptions{
-				AddSource:   addSource,
-				Level:       minLevel,
-				ReplaceAttr: replaceTimeAttr,
-			},
-		)
-	}
+func newTextHandler(w io.Writer) slog.Handler {
+	return slog.NewTextHandler(w,
+		&slog.HandlerOptions{
+			AddSource:   false,
+			Level:       minLevel,
+			ReplaceAttr: replaceTimeAttr,
+		},
+	)
 }
 
 func replaceTimeAttr(_ []string, attr slog.Attr) slog.Attr {
