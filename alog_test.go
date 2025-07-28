@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/amidgo/alog/alogtest"
 )
 
 func Test_Context_Handler(t *testing.T) {
@@ -284,4 +286,61 @@ func replaceTimeKey(staticTime time.Time) func(_ []string, a slog.Attr) slog.Att
 
 		return a
 	}
+}
+
+func Test_Start(t *testing.T) {
+	const opName = "Test_Start"
+
+	handler := alogtest.NewHandler(t,
+		&alogtest.AssertOptions{CheckOrder: true},
+		alogtest.Info("start",
+			OpKey, opName,
+			"key", "value",
+			"age", 10,
+		),
+		alogtest.Error("error",
+			OpKey, opName,
+			"key", "value",
+			"age", 10,
+			ErrorKey, io.ErrUnexpectedEOF.Error(),
+			"reason", "db",
+		),
+		alogtest.Info("finish",
+			OpKey, opName,
+			"key", "value",
+			"age", 10,
+		),
+	)
+
+	ctx := Context(t.Context(), handler)
+
+	op := Start(ctx,
+		opName,
+		"key", "value",
+		"age", 10,
+	)
+	defer op.Finish()
+
+	op.Error(io.ErrUnexpectedEOF, "reason", "db")
+}
+
+func Test_WithGroup(t *testing.T) {
+	handler := alogtest.NewHandler(t,
+		&alogtest.AssertOptions{
+			CheckOrder: true,
+		},
+		alogtest.Info("initial"),
+		alogtest.Info("get update", slog.Group("user", "age", 10, slog.Group("money", "value", 0))),
+	)
+
+	ctx := Context(t.Context(), handler)
+
+	Info(ctx, "initial")
+
+	ctx = WithGroup(ctx, "user")
+	ctx = WithAttrs(ctx, slog.Int("age", 10))
+	ctx = WithGroup(ctx, "money")
+	ctx = WithAttrs(ctx, slog.Int("value", 0))
+
+	Info(ctx, "get update")
 }

@@ -44,6 +44,14 @@ func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 	return Context(ctx, h)
 }
 
+func WithGroup(ctx context.Context, groupName string) context.Context {
+	h := Handler(ctx)
+
+	h = h.WithGroup(groupName)
+
+	return Context(ctx, h)
+}
+
 func Info(ctx context.Context, msg string, args ...any) {
 	alog(ctx, slog.LevelInfo, msg, args...)
 }
@@ -150,4 +158,44 @@ func errorAttr(err error) slog.Attr {
 	}
 
 	return slog.String(ErrorKey, err.Error())
+}
+
+const OpKey = "op"
+
+type Operation struct {
+	ctx context.Context
+}
+
+func Start(ctx context.Context, opName string, additionalArgs ...any) Operation {
+	const minArgsAmount = 1
+
+	args := make([]any, 0, len(additionalArgs)+minArgsAmount)
+
+	args = append(args, slog.String(OpKey, opName))
+	args = append(args, additionalArgs...)
+
+	ctx = With(ctx, args...)
+
+	op := Operation{
+		ctx: ctx,
+	}
+
+	alog(op.ctx, slog.LevelInfo, "start")
+
+	return op
+}
+
+func (op Operation) Finish() {
+	alogAttrs(op.ctx, slog.LevelInfo, "finish")
+}
+
+func (op Operation) Error(err error, additionalArgs ...any) {
+	const minArgsAmount = 1
+
+	args := make([]any, 0, len(additionalArgs)+minArgsAmount)
+
+	args = append(args, errorAttr(err))
+	args = append(args, additionalArgs...)
+
+	alog(op.ctx, slog.LevelError, "error", args...)
 }
