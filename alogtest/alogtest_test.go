@@ -235,7 +235,7 @@ func Test_Handler_SuccessCase_Parallel(t *testing.T) {
 
 	tester := newMockTester(t)
 
-	parallelCase(tester, (*AssertOptions)(nil), clientsCount)
+	parallelCase(tester, &AssertOptions{CheckOrder: false}, clientsCount)
 }
 
 type fatalfStubTester struct {
@@ -270,7 +270,7 @@ func Test_Handler_FatalfCase_Parallel(t *testing.T) {
 
 	tester := newFatalfStubTester(t)
 
-	parallelCase(tester, &AssertOptions{CheckOrder: true}, clientsCount)
+	parallelCase(tester, (*AssertOptions)(nil), clientsCount)
 }
 
 func parallelCase(tester Tester, opts *AssertOptions, clientsCount int) {

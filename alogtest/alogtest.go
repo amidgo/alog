@@ -74,7 +74,7 @@ func assertOptionsCheckOrder(opts *AssertOptions) bool {
 		return opts.CheckOrder
 	}
 
-	return false
+	return true
 }
 
 func assertOptionsAddSource(opts *AssertOptions) bool {

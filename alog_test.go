@@ -292,7 +292,7 @@ func Test_Start(t *testing.T) {
 	const opName = "Test_Start"
 
 	handler := alogtest.NewHandler(t,
-		&alogtest.AssertOptions{CheckOrder: true},
+		(*alogtest.AssertOptions)(nil),
 		alogtest.Info("start",
 			OpKey, opName,
 			"key", "value",
@@ -326,9 +326,7 @@ func Test_Start(t *testing.T) {
 
 func Test_WithGroup(t *testing.T) {
 	handler := alogtest.NewHandler(t,
-		&alogtest.AssertOptions{
-			CheckOrder: true,
-		},
+		(*alogtest.AssertOptions)(nil),
 		alogtest.Info("initial"),
 		alogtest.Info("get update", slog.Group("user", "age", 10, slog.Group("money", "value", 0))),
 	)
